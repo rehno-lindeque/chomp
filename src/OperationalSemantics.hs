@@ -74,8 +74,32 @@ import SyntaxTree
 -- Scope variable will typically be used to construct a Context which is a stack of scopes.
 -- Many operations must ignore the expression that has "focus", so the Scope type provides higher
 -- order functions that eliminate the need to deal with the focus expression directly.
--- Scope is implemented using integer to index the focus and a list of expressions
+-- Scope is implemented using a pair of expressions. The focus expressions are on the left while
+-- the environment (unfocussed expressions) are on the right.
+-- Note that the head of the focus list is always the active expression
 
+type Scope = ([Expression], [Expression])
+
+scopeFocus :: Scope -> Maybe Expression
+scopeFocus = liftM head . listToMaybe . snd
+
+scopeEnv :: Scope -> [Expression]
+scopeEnv = fst
+
+scopeUEnv :: Scope -> [Expression]
+scopeUEnv = snd
+
+
+
+scopeMap :: (Expression -> b) -> Scope -> [b]
+scopeMap f s = map f $ scopeEnv s
+
+scopeEmpty :: Scope
+scopeEmpty = ([],[])
+
+
+{- OLD:
+-- Scope is implemented using integer to index the focus and a list of expressions
 type Scope = (Int, [Expression])
 
 scopeFocus :: Scope -> Expression
@@ -90,6 +114,7 @@ scopeMap f s = map f $ scopeEnv s
 
 scopeEmpty :: Scope
 scopeEmpty = (0,[])
+--}
 
 -- A context is the path (stack of arrow declarations) leading to the current computation
 -- The path consists of a list of scopes, each of which is a collection of expression plus a focus
@@ -173,17 +198,23 @@ evalWithConjunct ctx ex0@(Eval (Declare ex00) ex01) ex1   = error "TODO: ..... N
 -- Note that the expression must not be stated in the same context that we are searching in (or it
 -- will simply match itself, causing an infinite loop)
 -- TODO: NOT SURE IF THIS SHOULD RETURN A RESULT OR JUST A LIST OF EXPRESSIONS...
+
 conjunctContext :: Context -> Expression -> [Expression]
 conjunctContext []         _  = []
-conjunctContext [c]        ex = conjunctCollection contextEmpty (scopeEnv c) ex
+conjunctContext ctx@[c]    ex = conjunctCollection ctx (scopeEnv c) ex
 conjunctContext ctx@(c:cs) ex = if matches /= [] then matches else conjunctContext cs ex
   where
-    matches = conjunctCollection ctx (scopeEnv c) ex   -- TODO: IS THIS THE CORRECT CONTEXT TO PASS THROUGH?
-                                                       --       POSSIBLY NEED TO LOOK AT THE CODE IN CONJUNCT
-                                                       --       TO ENSURE CIRCULAR REFERENCES DO NOT TAKE PLACE
+    matches = conjunctCollection cs (scopeEnv c) ex
 
--- Evaluates the expression inside the stack of contexts given
-eval :: Context -> Expression -> EvalResult
+
+-- Evaluate the focal expression of the current scope and output a new context
+evalScope :: Context -> Context
+
+
+-- Evaluates the expression inside the context given
+-- Note that the expression being evaluated should be contained on the "focus" side of the top-most
+-- scope in the context
+eval :: Context -> EvalResult
 
 {-
 ctx |- exs0 -> exs1
@@ -191,7 +222,7 @@ ctx |- exs0 -> exs1
 ctx |- exs0 -> exs1
 -}
 
-eval ctx ex@(Eval (Declare exs0) exs1)
+eval ctx@( c@( ex@( Eval (Declare exs0) exs1 ) : _, _ ) : cs )
   | True = Success [ex]
 
 {-
@@ -200,7 +231,7 @@ eval ctx ex@(Eval (Declare exs0) exs1)
        c:exs1
 -}
 
-eval ctx ex@(Eval (Assert (Conjunct exs1)) [])
+eval ctx@( c@( ex@( Eval (Assert (Conjunct exs1)) [] ) : _, _ ) : cs )
   | True = listToResult $ concat $ map (conjunctContext ctx) exs1
 
 {-
@@ -211,7 +242,7 @@ ctx |- .exs1:exs2
 (ctx `.` exs1):exs2
 -}
 
-eval ctx ex@(Eval (Witness (Conjunct exs1)) [])
+eval ctx@( c@( ex@( Eval (Witness (Conjunct exs1)) [] ) : _, _) : cs )
   | True =  Success $ concat $ map (conjunctContext ctx) exs1
 
 {-
@@ -241,5 +272,8 @@ ctx |- ????????
 --TODO: Just calling eval might not be correct, because it might only return a partial result
 --      when it has an error... for now we're just assuming this is the correct implementation for
 --      simplicity. Will come back to it later.
-uncheckedEval :: Context -> Expression -> [Expression]
-uncheckedEval ctx ex = resultToList $ eval ctx ex
+--uncheckedEval :: Context -> Expression -> [Expression]
+--uncheckedEval ctx ex = resultToList $ eval ctx ex
+
+uncheckedEval :: Context -> [Expression]
+uncheckedEval ctx = resultToList $ eval ctx
